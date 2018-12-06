@@ -184,7 +184,6 @@ Form.prototype.parse = function(req, cb) {
 
   setUpParser(self, boundary);
   req.pipe(self);
-
   function onReqAborted() {
     waitend = false;
     self.emit('aborted');
@@ -219,7 +218,8 @@ Form.prototype.parse = function(req, cb) {
 };
 // 首先童鞋们一定要注意源码 line:50 位置的`util.inherits(Form, stream.Writable)``
 // 大家看到这个方法可能会找不到此包在哪里调用，其实这关键的操作在于包一旦引入便进行了 写入流 stream.Writable 继承 Form 的操作，原本可写流的内部方法 writable._write 被 Form 原型中的 _write 先传入底层
-// 由此达到每次 transform 流都会调用我们在这里重写的 _write 方法，所以 req 作为继承可写流的 http.IncomingMessage 类在路由接收时就必然会调用本方法，由此达到目的
+// 由此达到每次 transform 流都会调用我们在这里重写的 _write 方法，在 parse 方法的最后调用 req.pipe(self) 时将 req 写入 Form 实例时触发
+// 由于 pipe 的原理实际就是监测 Readable 的 data 事件，然后在其中不停调用 Writable.write(chunk)，我们可以在 Form.protoytpe._write 中 log 出一个数字标记，然后在 Form.protoytpe.parse 的 req.pipe(self) 前后 log 标记，不过一定记得在后 log 时一定要使用 nextTick 跳过本次 event loop 的主进程循环，因为 pipe 是在异步的，是 event loop 的第一次 macro task，否则将一定会是后标记先出现在控制台
 Form.prototype._write = function(buffer, encoding, cb) {
   if (this.error) return;
 

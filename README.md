@@ -15,7 +15,7 @@
 ```
 // 首先童鞋们一定要注意源码 line:50 位置的`util.inherits(Form, stream.Writable)``
 // 大家看到这个方法可能会找不到此包在哪里调用，其实这关键的操作在于包一旦引入便进行了 写入流 stream.Writable 继承 Form 的操作，原本可写流的内部方法 writable._write 被 Form 原型中的 _write 先传入底层
-// 由此达到每次 transform 流都会调用我们在这里重写的 _write 方法，在 parse 方法的最后调用 req.pipe(self) 时由管道流进行写入操作时触发 _write 调用
+// 由此达到每次 transform 流都会调用我们在这里重写的 _write 方法，在 parse 方法的最后调用 req.pipe(self) 时由管道流将 req 写入 Form 实例时触发调用
 Form.prototype._write = function(buffer, encoding, cb) {
   if (this.error) return;
 
@@ -261,6 +261,39 @@ Form.prototype._write = function(buffer, encoding, cb) {
   }
 };
 ```
+
+针对不知道为什么 pipe 会触发 writable._write 的同学，我在这里清楚的解释下
+由于 pipe 的原理实际就是监测 Readable 的 data 事件，然后在其中不停调用 Writable.write(chunk)，如下简单实现 Readable.prototype.pipe(writable, options)
+```
+  readable.on('data', (chunk) => {
+    // 当发生背压时（即当前可用内存已写满此类情况）
+    if (writable.write(chunk) === false) {
+      readable.pause()
+    }
+  })
+
+  // drain 事件在写入流再次可继续写入时触发，此时将可读流恢复读取即可再次触发 data 事件去 write
+  writable.on('drain', () => {
+    readable.resume()
+  })
+```
+由上述简单实现我们已经看到了在 pipe 管道流的过程中，我们是不断的在调用 write 的，而 write 的底层实现就是 _write，所以我们改写的 _write 就会被调用啦。
+
+最后当 pipe 读写完毕后即 _write 全部调用完后 writable 会源码会进行以下顺序触发调用
+1. 触发 finish 事件从而使 setUpParser 函数中监听 finish 的函数发生调用
+2. 紧接着调用 endFlush => maybeClose => holdEmitQueue闭包调用
+3. 下一事件循环触发 close 事件 => 由此触发 Form.prototype.parse 由回调时监听的 close 事件，而将表单的 field 与 file 都注入使用者的回调内
+
+下面是我打印的调用顺序，由于 pipe 是一个基于事件循环（event loop）的异步过程，所以第一次 pipe 完一定会是会在下一个事件循环队列，所以我们必须跳过第一次的主进程循环队列的 macro task 所以，下面是我的 log 过程及结果
+
+###### 插入标记
+![parse 中的插入输出](https://img-blog.csdnimg.cn/20181206211209656.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3lvbG8wOTI3,size_16,color_FFFFFF,t_70)
+![_write 中的插入输出](https://img-blog.csdnimg.cn/2018120621124293.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3lvbG8wOTI3,size_16,color_FFFFFF,t_70)
+###### 输出结果
+![在这里插入图片描述](https://img-blog.csdnimg.cn/20181206211353631.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3lvbG8wOTI3,size_16,color_FFFFFF,t_70)
+
+这就是最好的证明了～
+
 
 大家最好是在 IDE 中对着源码看会比较容易看点，如果大家像我一样一遍看不懂就看两遍，不行就三遍，因为我就是这么做的= =。。。
 
