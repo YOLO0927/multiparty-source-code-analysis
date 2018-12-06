@@ -12,10 +12,13 @@
 
 大家一定要注意我标记的三行解释，它充分的告诉了我们，这个方法是内部方法，只要我们利用继承，将 `From` 的原型继承到 `Stream.Writable ` 中即可实现，下面放上我对 `Form.prototype._write` 的整段分析，而整个中间件的核心也就是这个方法了，其他多为此方法的辅助函数
 
+首先童鞋们一定要注意源码 line:50 位置的`util.inherits(Form, stream.Writable)``
+大家看到这个方法可能会找不到此包在哪里调用，其实这关键的操作在于包一旦引入便进行了 Form 继承 写入流 stream.Writable 的操作，原本可写流的内部方法 writable._write 被 Form 原型中的 _write 先传入底层
+
+再次实例化 Form 调用 write 时将会使用的底层函数会是我们写的 ``Form.prototype._write``，**由此我们不但使 Form 的实例化对象具有写入流，并且还重写了写入的逻辑**
+
+达到每次 transform 流都会调用我们在这里重写的 _write 方法，在 parse 方法的最后调用 req.pipe(self) 时由管道流将 req 写入 Form 实例时触发调用
 ```
-// 首先童鞋们一定要注意源码 line:50 位置的`util.inherits(Form, stream.Writable)``
-// 大家看到这个方法可能会找不到此包在哪里调用，其实这关键的操作在于包一旦引入便进行了 写入流 stream.Writable 继承 Form 的操作，原本可写流的内部方法 writable._write 被 Form 原型中的 _write 先传入底层
-// 由此达到每次 transform 流都会调用我们在这里重写的 _write 方法，在 parse 方法的最后调用 req.pipe(self) 时由管道流将 req 写入 Form 实例时触发调用
 Form.prototype._write = function(buffer, encoding, cb) {
   if (this.error) return;
 
