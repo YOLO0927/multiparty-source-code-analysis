@@ -267,7 +267,7 @@ Form.prototype._write = function(buffer, encoding, cb) {
 
 针对不知道为什么 pipe 会触发 writable._write 的同学，我在这里清楚的解释下
 由于 pipe 的原理实际就是监测 Readable 的 data 事件，然后在其中不停调用 Writable.write(chunk)，如下简单实现 Readable.prototype.pipe(writable, options)
-```
+```js
   readable.on('data', (chunk) => {
     // 当发生背压时（即当前可用内存已写满此类情况）
     if (writable.write(chunk) === false) {
